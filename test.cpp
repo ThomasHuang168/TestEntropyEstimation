@@ -7,6 +7,14 @@
 using namespace std;
 using namespace cv;
 
+void writeCSV(string filename, Mat m)
+{
+	ofstream myfile;
+	myfile.open(filename.c_str());
+	myfile << cv::format(m, cv::Formatter::FMT_CSV) << std::endl;
+	myfile.close();
+}
+
 double variance(vector <double> v) {
 	double sum = std::accumulate(std::begin(v), std::end(v), 0.0);
 	double mean = sum / v.size();
@@ -61,37 +69,6 @@ public:
 			cout << numComputation << " Total (entropy|variance) computations" << endl;
 			return numComputation;
 		}
-	}
-
-	size_t Index(size_t number, vector<size_t> cond) const
-	{
-		size_t index = -1, indexBase = 0;
-		size_t condSize = cond.size();
-		if (condSize == 0)
-		{
-			index = number * m_numElement;
-		}
-		sort(cond.begin(), cond.end());
-		for (size_t i = condSize - 1; i >= 0; i--)
-		{
-			indexBase +=  combination(m_numElement - 1, i);
-		}
-		size_t prev = 0;
-		size_t subsetSize = condSize;
-		size_t i = cond.size() - 1;
-		for (size_t j = m_numElement - 1; j >= 0; j--)
-		{
-			if (cond[i] == j)
-			{
-				if (i > j)
-				{
-					cout << "cond[" << i << "] = " << cond[i] << " == j (" << j << ")" << endl;
-					indexBase += combination(cond[i], i + 1);
-				}
-			}
-		}
-		index = indexBase;
-		return index;
 	}
 
 	//CombinationIndex iterator element in combination increasing order
@@ -351,7 +328,7 @@ public:
 			eleByResp.push_back(ele);
 		}
 		size_t indexInResp = combinationIndex(m_numElement, eleByResp);
-		size_t index = indResp * m_tableCols + indexInResp;
+		size_t index = indResp * m_tableRows + indexInResp;
 		return index;
 	}
 
@@ -371,7 +348,7 @@ public:
 		return result;
 	}
 
-	size_t buildTable(string filename, size_t order)
+	size_t buildTable(string filename, string model, size_t order) 
 	{
 		m_order = order;
 		//LoadFromCSV
@@ -385,21 +362,9 @@ public:
 		MatResp.release();
 		cout << "MatData:\n" << MatData << endl;
 
-		//Split into n Datasets
-		nCVFold = 3;
 		m_numSample = MatData.size().height;
 		m_numElement = MatData.size().width;
 		cout << m_numSample << " - " << m_numElement << endl;
-		if (m_numSample < nCVFold)
-		{
-			cerr << "height (" << m_numSample << ") is less than nCVFold (" << nCVFold << ")" << endl;
-			return 1;
-		}
-		size_t stepSize = m_numSample / nCVFold;
-		if (0 != m_numSample % nCVFold)
-		{
-			stepSize++;
-		}
 
 		int TableSize = GetNumberofEntropyComputation(order);
 		EntropyTable.resize(TableSize);
@@ -410,130 +375,242 @@ public:
 		}
 		else
 		{
-			cout << "There are " << TableSize << "of var/entropy computations, \n which is (" << m_numElement << " * " << TableSize / m_numElement << " + " << TableSize % m_numElement << ")" << endl;
+			cout << "There are " << TableSize << " of var/entropy computations, \n which is (" << m_numElement << " (num of RV) * " << TableSize / m_numElement << " (num of sample/RV) + " << TableSize % m_numElement << ")" << endl;
 		}
 
-		//Compute all variance and conditional entropy 
-		for (size_t curStep = 0; curStep < m_numSample; curStep += stepSize)
+		size_t combinationPerResp = 0;
+		for (int i = 0; i < order; i++)
 		{
-			//Generate Train and Test;
-			Mat MatTest = MatData(Range(curStep, min(curStep + stepSize, m_numSample)), Range::all());
-			//cout << "MatTest:\n" << MatTest << endl;
-			Mat MatTrain;
-			if (curStep == 0)
-			{
-				MatTrain = MatData(Range(curStep + stepSize, m_numSample), Range::all());
-			}
-			else if (curStep + stepSize >= m_numSample)
-			{
-				MatTrain = MatData(Range(0, curStep), Range::all());
-			}
-			else
-			{
-				vconcat(MatData(Range(0, curStep), Range::all()), MatData(Range(curStep + stepSize, m_numSample), Range::all()), MatTrain);
-			}
-			//cout << "MatTrain:\n" << MatTrain << endl;
+			combinationPerResp += combination(m_numElement - 1, i);
+		}
+		m_tableRows = combinationPerResp;
 
-			//Select Responce
-			size_t indResp = 0;
+		//Compute all variance and conditional entropy 
+
+		//Split into n Datasets
+		m_numCVFold = 3;
+		if (m_numSample < m_numCVFold)
+		{
+			cerr << "height (" << m_numSample << ") is less than nCVFold (" << m_numCVFold << ")" << endl;
+			return 1;
+		}
+		size_t stepSize = m_numSample / m_numCVFold;
+		if (0 != m_numSample % m_numCVFold)
+		{
+			stepSize++;
+		}
+
+		//Select Responce
+		size_t indResp = 0;
+		for (;indResp < m_numElement; indResp++)
+		{
+			//cout << "MatTrain:\n" << MatTrain << endl;
 			//iterate all train dataset combinations
 			Mat MatTrainSample, MatTrainResp, MatTestSample, MatTestResp;
-			size_t combinationPerResp = 0;
-			for (int i = 0; i < order; i++)
+			//new variable to replace 
+			Mat MatResp, MatSample;
 			{
-				combinationPerResp += combination(m_numElement - 1, i);
+				MatResp = MatData(Range::all(), Range(indResp, indResp + 1));
 			}
-			m_tableCols = combinationPerResp;
-			{
-				//compute variance (index = 0)
-				float TestVariance;
-				MatTrainResp = MatTrain(Range::all(), Range(indResp, indResp + 1));
-				cout << "MatTrainResp: \n" << MatTrainResp << endl;
-				MatTestResp = MatTest(Range::all(), Range(indResp, indResp + 1));
-				cout << "MatTestResp: \n" << MatTestResp << endl;
-
-				Scalar m, stdv;
-				meanStdDev(MatTestResp, m, stdv);
-				cout << m << stdv << endl;
-				TestVariance = stdv[0] * stdv[0];
-				EntropyTable[indResp * m_tableCols] = TestVariance;
-			}
-			for (int index = 1; index < combinationPerResp; index++)
+			for (int index = 0; index < combinationPerResp; index++)
 			{
 				if (indResp < 0 || indResp >= m_numElement)
 				{
 					cerr << "Index of Responce (" << indResp << ") is out of Range [0, " << m_numElement << ")" << endl;
 					return 1;
 				}
+				if (0 == index)
+				{
+					//compute variance (index = 0)
+					float TestVariance = 0;
+					cout << "MatResp: \n" << MatResp << endl;
 
-				//Select Sample set by index
-				vector<size_t> sampleSet = getElement(index, indResp);
-				if (sampleSet.size() < 1)
-				{
-					cerr << "unexpected result" << endl;
-					return 1;
-				}
-				else 
-				{
-					MatTrainSample = MatTrain(Range::all(), Range(sampleSet[0], sampleSet[0] + 1));
-					MatTestSample = MatTest(Range::all(), Range(sampleSet[0], sampleSet[0] + 1));
-					for (int i = 1; i < sampleSet.size(); i++)
+					Scalar m, stdv;
+					for (size_t curStep = 0; curStep < m_numSample; curStep += stepSize)
 					{
-						hconcat(MatTrainSample, MatTrain(Range::all(), Range(sampleSet[i], sampleSet[i] + 1)), MatTrainSample);
-						hconcat(MatTestSample, MatTest(Range::all(), Range(sampleSet[i], sampleSet[i] + 1)), MatTestSample);
+						/********************************************************************************/
+						MatTrainResp.release();
+						MatTestResp.release();
+						if (curStep == 0)
+						{
+							MatTrainResp = MatResp(Range(curStep + stepSize, m_numSample), Range::all());
+						}
+						else if (curStep + stepSize >= m_numSample)
+						{
+							MatTrainResp = MatResp(Range(0, curStep), Range::all());
+						}
+						else
+						{
+							vconcat(MatResp(Range(0, curStep), Range::all()), MatResp(Range(curStep + stepSize, m_numSample), Range::all()), MatTrainResp);
+						}
+						cout << "MatTrainResp:\n" << MatTrainResp << endl;
+
+						MatTestResp = MatResp(Range(curStep, min(curStep + stepSize, m_numSample)), Range::all());
+						cout << "MatTestResp:\n" << MatTestResp << endl;
+						/********************************************************************************/
+
+						meanStdDev(MatTestResp, m, stdv);
+						cout << m << stdv << endl;
+						TestVariance += stdv[0] * stdv[0];
 					}
+					EntropyTable[indResp * m_tableRows] = TestVariance / m_numCVFold;
 				}
-				//if (indResp == 0)
-				//{
-				//	MatTrainSample = MatTrain(Range::all(), Range(indResp + 1, m_numElement));
-				//	MatTestSample = MatTest(Range::all(), Range(indResp + 1, m_numElement));
-				//}
-				//else if (indResp == m_numElement - 1)
-				//{
-				//	MatTrainSample = MatTrain(Range::all(), Range(0, indResp));
-				//	MatTestSample = MatTest(Range::all(), Range(0, indResp));
-				//}
-				//else
-				//{
-				//	hconcat(MatTrain(Range::all(), Range(0, indResp)), MatTrain(Range::all(), Range(indResp + 1, m_numElement)), MatTrainSample);
-				//	hconcat(MatTest(Range::all(), Range(0, indResp)), MatTest(Range::all(), Range(indResp + 1, m_numElement)), MatTestSample);
-				//}
-				cout << "MatTrainSample: \n" << MatTrainSample << endl;
-				cout << "MatTestSample: \n" << MatTestSample << endl;
+				else
+				{
+					//Select Sample set by index
+					vector<size_t> sampleSet = getElement(index, indResp);
+					if (sampleSet.size() < 1)
+					{
+						cerr << "unexpected result" << endl;
+						return 1;
+					}
+					else
+					{
+						MatSample = MatData(Range::all(), Range(sampleSet[0], sampleSet[0] + 1));
+						for (int i = 1; i < sampleSet.size(); i++)
+						{
+							hconcat(MatSample, MatData(Range::all(), Range(sampleSet[i], sampleSet[i] + 1)), MatSample);
+						}
+					}
+					cout << "MatSample: \n" << MatSample << endl;
 
-				Ptr<ml::TrainData> PtrTrain = ml::TrainData::create(MatTrainSample, ml::ROW_SAMPLE, MatTrainResp);
-				Ptr<ml::TrainData> PtrTest = ml::TrainData::create(MatTestSample, ml::ROW_SAMPLE, MatTestResp);
+					float sumPerf = 0.0;
+					for (size_t curStep = 0; curStep < m_numSample; curStep += stepSize)
+					{
+						/********************************************************************************/
+						MatTrainResp.release();
+						MatTestResp.release();
+						if (curStep == 0)
+						{
+							MatTrainResp = MatResp(Range(curStep + stepSize, m_numSample), Range::all());
+						}
+						else if (curStep + stepSize >= m_numSample)
+						{
+							MatTrainResp = MatResp(Range(0, curStep), Range::all());
+						}
+						else
+						{
+							vconcat(MatResp(Range(0, curStep), Range::all()), MatResp(Range(curStep + stepSize, m_numSample), Range::all()), MatTrainResp);
+						}
+						cout << "MatTrainResp:\n" << MatTrainResp << endl;
 
-				//Create a Model
-				Ptr<ml::DTrees> dtree = ml::DTrees::create();
+						MatTestResp = MatResp(Range(curStep, min(curStep + stepSize, m_numSample)), Range::all());
+						cout << "MatTestResp:\n" << MatTestResp << endl;
 
-				//Set parameters
-				dtree->setMaxDepth(5);
-				dtree->setMinSampleCount(10);
-				dtree->setRegressionAccuracy(0.01f);
-				dtree->setUseSurrogates(false /* true */);
-				dtree->setMaxCategories(15);
-				dtree->setCVFolds(0 /*10*/); // nonzero causes core dump
-				dtree->setUse1SERule(true);
-				dtree->setTruncatePrunedTree(true);
-				dtree->setPriors(cv::Mat()); // ignore priors for now...
+						MatTrainSample.release();
+						MatTestSample.release();
+						if (curStep == 0)
+						{
+							MatTrainSample = MatSample(Range(curStep + stepSize, m_numSample), Range::all());
+						}
+						else if (curStep + stepSize >= m_numSample)
+						{
+							MatTrainSample = MatSample(Range(0, curStep), Range::all());
+						}
+						else
+						{
+							vconcat(MatSample(Range(0, curStep), Range::all()), MatSample(Range(curStep + stepSize, m_numSample), Range::all()), MatTrainSample);
+						}
+						cout << "MatTrainSample:\n" << MatTrainSample << endl;
 
-				dtree->train(PtrTrain);
+						MatTestSample = MatSample(Range(curStep, min(curStep + stepSize, m_numSample)), Range::all());
+						cout << "MatTestSample:\n" << MatTestSample << endl;
+						/********************************************************************************/
 
-				Mat results;
+						Ptr<ml::TrainData> PtrTrain = ml::TrainData::create(MatTrainSample, ml::ROW_SAMPLE, MatTrainResp);
+						Ptr<ml::TrainData> PtrTest = ml::TrainData::create(MatTestSample, ml::ROW_SAMPLE, MatTestResp);
 
-				float performance = dtree->calcError(PtrTest, false, results);
-				cout << "performance: " << performance << endl;
-				vector<size_t> cond;
-				EntropyTable[index + indResp * combinationPerResp] = performance;
+						float performance = 0.0;
+
+						Mat results;
+
+						if ("cart" == model)
+						{
+							//Create a Model
+							Ptr<ml::DTrees> dtree = ml::DTrees::create();
+
+							//Set parameters
+							dtree->setMaxDepth(5);
+							dtree->setMinSampleCount(10);
+							dtree->setRegressionAccuracy(0.01f);
+							dtree->setUseSurrogates(false /* true */);
+							dtree->setMaxCategories(15);
+							dtree->setCVFolds(0 /*10*/); // nonzero causes core dump
+							dtree->setUse1SERule(true);
+							dtree->setTruncatePrunedTree(true);
+							dtree->setPriors(cv::Mat()); // ignore priors for now...
+
+							dtree->train(PtrTrain);
+
+							performance = dtree->calcError(PtrTest, false, results);
+						}
+						else if ("svr" == model)
+						{
+							Ptr<ml::SVM> svr = ml::SVM::create();
+							svr->setKernel(ml::SVM::KernelTypes::LINEAR);
+							svr->setGamma(10.0);
+							svr->setDegree(0.1);
+							svr->setCoef0(0.0);
+							svr->setNu(0.1);
+							svr->setP(0.1);
+							svr->train(PtrTrain);
+							if (!svr->isTrained())
+							{
+								cerr << "error occur during SVR training" << endl;
+							}
+							performance = svr->calcError(PtrTest, false, results);
+						}
+						else if ("svmsgd" == model)
+						{
+							Ptr<ml::SVMSGD> svmsgd = ml::SVMSGD::create();
+							svmsgd->setSvmsgdType(ml::SVMSGD::ASGD);
+							svmsgd->train(PtrTrain);
+							if (!svmsgd->isTrained())
+							{
+								cerr << "error occur during SVR training" << endl;
+							}
+							performance = svmsgd->calcError(PtrTest, false, results);
+						}
+						cout << "performance: " << performance << endl;
+						sumPerf += performance;
+					}
+					EntropyTable[index + indResp * combinationPerResp] = sumPerf / m_numCVFold;
+				}
 			}
 		}
 		return 0;
 	}
-	size_t m_tableRows;
-	size_t m_tableCols, m_numElement, m_order, m_numSample, nCVFold;
+
+	void writeTableCSV(string filename)
+	{
+		ofstream csv;
+		csv.open(filename.c_str());
+		if (csv.is_open())
+		{
+			size_t Cols = m_numElement, Rows = m_tableRows;
+			if (EntropyTable.size() != Rows * Cols)
+			{
+				cerr << "Inconsistent Table Size" << endl;
+				return;
+			}
+			for (int i = 0; i < Rows; i++)
+			{
+				for (int j = 0; j < Cols; j++)
+				{
+					if (j != 0)
+					{
+						csv << ", ";
+					}
+					csv << EntropyTable[i + j * Rows];
+				}
+				csv << endl;
+			}
+			csv.close();
+		}
+	}
+
+	size_t m_tableRows, m_numElement, m_order, m_numSample, m_numCVFold;
 	vector< float> EntropyTable;
-	vector<size_t> orderIndex;
 };
 
 int main(int argc, char **argv)
@@ -556,68 +633,9 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	//vector<vector<double>> array;
-	//{
-	//	string line, val;
-	//	while (getline(f, line))
-	//	{
-	//		vector<double> v;
-	//		stringstream s(line);
-	//		while (getline(s, val, ','))
-	//		{
-	//			v.push_back(std::stod(val));
-	//		}
-	//		array.push_back(v);
-	//	}
-
-	//	for (auto& row : array)
-	//	{
-	//		for (auto& val : row)
-	//		{
-	//			cout << val << "\t";
-	//		}
-	//		cout << "\n";
-	//	}
-	//	fflush(stdout);
-	//}
-
-	//Ptr<ml::TrainData> PtrTrainData, PtrTestData;
-	//{
-	//	vector<vector<double>> TrainArray, TestArray;
-	//	int i = 0;
-	//	for (auto& subArray : array)
-	//	{
-	//		if (i % 2)
-	//		{
-	//			TrainArray.push_back(subArray);
-	//		}
-	//		else
-	//		{
-	//			TestArray.push_back(subArray);
-	//		}
-	//	}
-	//	PtrTrainData = ml::TrainData::create(TrainArray, ml::ROW_SAMPLE, noArray());
-	//	PtrTestData = ml::TrainData::create(TestArray, ml::ROW_SAMPLE, noArray());
-	//}
-	////for each dataset
-	////treat it as test dataset 
-	////treat other as train dataset
-	//average out the calerror by cvFolds
-	//write the error into output table
-	//Python wrapper
-
 	EntropyEstimation EE;
-	EE.buildTable(argv[1], 2);
-
-	//size_t n = 5;
-	//size_t pow = 2 * 2 * 2 * 2 * 2;
-	//for (size_t i = 0; i < pow; i++)
-	//{
-	//	size_t temp = i;
-	//	cout << endl;
-	//}
-
-
+	EE.buildTable(argv[1], argv[2], 2);
+	EE.writeTableCSV("output.csv");
 
 	return 0;
 }

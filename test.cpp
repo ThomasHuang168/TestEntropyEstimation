@@ -3,6 +3,7 @@
 #include<fstream>
 #include<vector>
 #include<numeric>
+#include <random>
 
 using namespace std;
 using namespace cv;
@@ -45,6 +46,44 @@ size_t combination(size_t n, size_t r)
 class EntropyEstimation
 {
 public:
+
+	EntropyEstimation()
+	{
+		m_numCVFold = 3;
+		m_order = 2;
+	}
+
+	EntropyEstimation(size_t CVFold, size_t order)
+	{
+		m_numCVFold = CVFold;
+		m_order = order;
+	}
+
+	~EntropyEstimation()
+	{
+
+	}
+
+	size_t GetOrder(void) const
+	{
+		return m_order;
+	}
+
+	void SetOrder(const size_t order)
+	{
+		m_order = order;
+	}
+
+	size_t GetCVFold(void) const
+	{
+		return m_numCVFold;
+	}
+
+	size_t SetCVFold(const size_t numCVFold)
+	{
+		m_numCVFold = numCVFold;
+	}
+
 	//Compute Number of computation using order specified
 	size_t GetNumberofEntropyComputation(const size_t order) const
 	{
@@ -69,6 +108,7 @@ public:
 			return numComputation;
 		}
 	}
+
 	//CombinationIndex iterator element in combination increasing order
 	//zero-based comb 
 	//order is number of element in universe
@@ -300,6 +340,8 @@ public:
 	
 	//encode element in EntropyTable
 	//zero-based vect and indResp
+	//indResp: index of Responce Column/Element
+	//vect: index(es) of those Col/Element conditioning the Responce
 	//return zero-based Table index
 	size_t getIndex(vector<size_t> vect, size_t indResp)
 	{
@@ -346,9 +388,8 @@ public:
 		return result;
 	}
 
-	size_t buildTable(string filename, string model, size_t order) 
+	size_t buildTable(string filename, string model, bool verbose = false) 
 	{
-		m_order = order;
 		//LoadFromCSV
 		Ptr<ml::TrainData> PtrData;
 		PtrData = ml::TrainData::loadFromCSV(filename.c_str(), 0);
@@ -358,26 +399,32 @@ public:
 		hconcat(MatSample, MatResp, MatData);
 		MatSample.release();
 		MatResp.release();
-		cout << "MatData:\n" << MatData << endl;
+		if (verbose)
+		{
+			cout << "MatData:\n" << MatData << endl;
+		}
 
 		m_numSample = MatData.size().height;
 		m_numElement = MatData.size().width;
-		cout << m_numSample << " - " << m_numElement << endl;
+		if (verbose)
+		{
+			cout << m_numSample << " - " << m_numElement << endl;
+		}
 
-		int TableSize = GetNumberofEntropyComputation(order);
+		int TableSize = GetNumberofEntropyComputation(m_order);
 		EntropyTable.resize(TableSize);
 		if (TableSize != EntropyTable.size())
 		{
 			cerr << TableSize << " != " << EntropyTable.size();
 			return 1;
 		}
-		else
+		else if (verbose)
 		{
 			cout << "There are " << TableSize << " of var/entropy computations, \n which is (" << m_numElement << " (num of RV) * " << TableSize / m_numElement << " (num of sample/RV) + " << TableSize % m_numElement << ")" << endl;
 		}
 
 		size_t combinationPerResp = 0;
-		for (int i = 0; i < order; i++)
+		for (int i = 0; i < m_order; i++)
 		{
 			combinationPerResp += combination(m_numElement - 1, i);
 		}
@@ -386,7 +433,6 @@ public:
 		//Compute all variance and conditional entropy 
 
 		//Split into n Datasets
-		m_numCVFold = 3;
 		if (m_numSample < m_numCVFold)
 		{
 			cerr << "height (" << m_numSample << ") is less than nCVFold (" << m_numCVFold << ")" << endl;
@@ -421,7 +467,10 @@ public:
 				{
 					//compute variance (index = 0)
 					float TestVariance = 0;
-					cout << "MatResp: \n" << MatResp << endl;
+					if (verbose)
+					{
+						cout << "MatResp: \n" << MatResp << endl;
+					}
 
 					Scalar m, stdv;
 					for (size_t curStep = 0; curStep < m_numSample; curStep += stepSize)
@@ -441,10 +490,16 @@ public:
 						{
 							vconcat(MatResp(Range(0, curStep), Range::all()), MatResp(Range(curStep + stepSize, m_numSample), Range::all()), MatTrainResp);
 						}
-						cout << "MatTrainResp:\n" << MatTrainResp << endl;
+						if (verbose)
+						{
+							cout << "MatTrainResp:\n" << MatTrainResp << endl;
+						}
 
 						MatTestResp = MatResp(Range(curStep, min(curStep + stepSize, m_numSample)), Range::all());
-						cout << "MatTestResp:\n" << MatTestResp << endl;
+						if (verbose)
+						{
+							cout << "MatTestResp:\n" << MatTestResp << endl;
+						}
 						/********************************************************************************/
 
 						meanStdDev(MatTestResp, m, stdv);
@@ -470,7 +525,10 @@ public:
 							hconcat(MatSample, MatData(Range::all(), Range(sampleSet[i], sampleSet[i] + 1)), MatSample);
 						}
 					}
-					cout << "MatSample: \n" << MatSample << endl;
+					if (verbose)
+					{
+						cout << "MatSample: \n" << MatSample << endl;
+					}
 
 					float sumPerf = 0.0;
 					for (size_t curStep = 0; curStep < m_numSample; curStep += stepSize)
@@ -490,10 +548,16 @@ public:
 						{
 							vconcat(MatResp(Range(0, curStep), Range::all()), MatResp(Range(curStep + stepSize, m_numSample), Range::all()), MatTrainResp);
 						}
-						cout << "MatTrainResp:\n" << MatTrainResp << endl;
+						if (verbose)
+						{
+							cout << "MatTrainResp:\n" << MatTrainResp << endl;
+						}
 
 						MatTestResp = MatResp(Range(curStep, min(curStep + stepSize, m_numSample)), Range::all());
-						cout << "MatTestResp:\n" << MatTestResp << endl;
+						if (verbose)
+						{
+							cout << "MatTestResp:\n" << MatTestResp << endl;
+						}
 
 						MatTrainSample.release();
 						MatTestSample.release();
@@ -509,10 +573,16 @@ public:
 						{
 							vconcat(MatSample(Range(0, curStep), Range::all()), MatSample(Range(curStep + stepSize, m_numSample), Range::all()), MatTrainSample);
 						}
-						cout << "MatTrainSample:\n" << MatTrainSample << endl;
+						if (verbose)
+						{
+							cout << "MatTrainSample:\n" << MatTrainSample << endl;
+						}
 
 						MatTestSample = MatSample(Range(curStep, min(curStep + stepSize, m_numSample)), Range::all());
-						cout << "MatTestSample:\n" << MatTestSample << endl;
+						if (verbose)
+						{
+							cout << "MatTestSample:\n" << MatTestSample << endl;
+						}
 						/********************************************************************************/
 
 						Ptr<ml::TrainData> PtrTrain = ml::TrainData::create(MatTrainSample, ml::ROW_SAMPLE, MatTrainResp);
@@ -569,7 +639,10 @@ public:
 							}
 							performance = svmsgd->calcError(PtrTest, false, results);
 						}
-						cout << "performance: " << performance << endl;
+						if (verbose)
+						{
+							cout << "performance: " << performance << endl;
+						}
 						sumPerf += performance;
 					}
 					EntropyTable[index + indResp * combinationPerResp] = sumPerf / m_numCVFold;
@@ -631,9 +704,26 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	EntropyEstimation EE;
-	EE.buildTable(argv[1], argv[2], 2);
-	EE.writeTableCSV("output.csv");
+	//EntropyEstimation EE(3, 4);
+	//EE.buildTable(argv[1], argv[2]);
+	//EE.writeTableCSV("..\\output.csv");
+	const int nrolls = 10000;
+	const int nstars = 95;
+	default_random_engine generator;
+	uniform_int_distribution<int> distribution(0, 9);
+
+	int p[10] = {};
+
+	for (int i = 0; i < nrolls; ++i) {
+		int number = distribution(generator);
+		++p[number];
+	}
+
+	std::cout << "uniform_int_distribution (0,9):" << std::endl;
+	for (int i = 0; i < 10; ++i)
+	{
+		std::cout << i << ": " << std::string(p[i] * nstars / nrolls, '*') << std::endl;
+	}
 
 	return 0;
 }

@@ -111,7 +111,7 @@ public:
 
 	//CombinationIndex iterator element in combination increasing order
 	//zero-based comb 
-	//order is number of element in universe
+	//size is number of element in universe
 	//for example
 	//	Index	|Elements (order = 4)
 	//	0		|0000
@@ -130,7 +130,7 @@ public:
 	//	13		|1101
 	//	14		|1110
 	//	15		|1111
-	static size_t combinationIndex(size_t order, vector<size_t> comb, bool verbose = false)
+	static size_t combinationIndex(size_t size, vector<size_t> comb, bool verbose = false)
 	{
 		if (verbose)
 		{
@@ -139,7 +139,7 @@ public:
 			{
 				cout << comb[i] << ", ";
 			}
-			cout << "} in order " << order << endl;
+			cout << "} in a set with size = " << size << endl;
 		}
 
 		size_t index = 0;
@@ -152,10 +152,10 @@ public:
 		//for (int i = condSize - 1; i >= 0; i--)
 		for (int i = 0; i < condSize; i++)
 		{
-			index += combination(order, i);
+			index += combination(size, i);
 			if (verbose)
 			{
-				cout << order << "C" << i << "  ";
+				cout << size << "C" << i << "  ";
 			}
 		}
 		size_t prev = 0;
@@ -180,18 +180,18 @@ public:
 		return index;
 	}
 
-	static void TestCombinationIndexAndVector(size_t order)
+	static void TestCombinationIndexAndVector(size_t size)
 	{
 		size_t error = 0;
-		size_t pow = 1 << order;
-		cout << "\nTest Comb Index 2 Vector with order " << order << endl;
+		size_t pow = 1 << size;
+		cout << "\nTest Comb Index 2 Vector with size" << size << endl;
 		for (size_t i = 0; i < pow; i++)
 		{
 			cout << i << "\t";
 			vector<size_t> comb;
-			comb = EntropyEstimation::combinationIndex2Vector(order, i);
+			comb = EntropyEstimation::combinationIndex2Vector(size, i);
 
-			size_t result = EntropyEstimation::combinationIndex(order, comb);
+			size_t result = EntropyEstimation::combinationIndex(size, comb);
 			cout << result << "\t";
 
 			if (i != result)
@@ -200,7 +200,7 @@ public:
 			}
 
 			sort(comb.begin(), comb.end());
-			for (int j = order - 1, k = comb.size() - 1; j >= 0; j--)
+			for (int j = size - 1, k = comb.size() - 1; j >= 0; j--)
 			{
 				if (k < 0)
 				{
@@ -221,14 +221,14 @@ public:
 		cout << "error: " << error << endl;
 	}
 
-	static void TestCombinationIndex(size_t order)
+	static void TestCombinationIndex(size_t size)
 	{
-		size_t pow = 1 << order;
+		size_t pow = 1 << size;
 		for (size_t i = 0; i < pow; i++)
 		{
 			size_t curComb = i;
 			vector<size_t> comb;
-			for (size_t div = pow / 2, j = order - 1; div > 0; div /= 2, j--)
+			for (size_t div = pow / 2, j = size - 1; div > 0; div /= 2, j--)
 			{
 				if (curComb / div == 1)
 				{
@@ -236,21 +236,21 @@ public:
 					curComb %= div;
 				}
 			}
-			EntropyEstimation::combinationIndex(order, comb, true);
+			EntropyEstimation::combinationIndex(size, comb, true);
 		}
 	}
 
-	static void TestCombinationIndex2Vector(size_t order)
+	static void TestCombinationIndex2Vector(size_t size)
 	{
-		size_t pow = 1 << order;
-		cout << "\nTest Comb Index 2 Vector with order " << order << endl;
+		size_t pow = 1 << size;
+		cout << "\nTest Comb Index 2 Vector with order " << size << endl;
 		for (size_t i = 0; i < pow; i++)
 		{
 			cout << i << "\t";
 			vector<size_t> comb;
-			comb = EntropyEstimation::combinationIndex2Vector(order, i);
+			comb = EntropyEstimation::combinationIndex2Vector(size, i);
 			sort(comb.begin(), comb.end());
-			for (int j = order - 1, k = comb.size() - 1; j >= 0; j--)
+			for (int j = size - 1, k = comb.size() - 1; j >= 0; j--)
 			{
 				if (k < 0)
 				{
@@ -270,18 +270,20 @@ public:
 		}
 	}
 
-	static vector<size_t> combinationIndex2Vector(size_t order, size_t index)
+	static vector<size_t> combinationIndex2Vector(size_t size, size_t index)
 	{
 		vector<size_t> Output;
 		//Get number of Element by order defined in 
 		//CombinationIndex
 		//use decomposition of combination
+		//For example: r = 2, n = c + d, 2 <= min(c,d)
+		//				nCr = (c + d)C2 = cC0*dC2 + cC1*dC1 + cC2*dC0
 		//if index >= (order)C0, that means there are at least one element
 		//in the vector
 		size_t numOutput = 0, tempSum = 0;
-		for (numOutput = 0; numOutput < order; numOutput++)
+		for (numOutput = 0; numOutput < size; numOutput++)
 		{
-			size_t comb = combination(order, numOutput);
+			size_t comb = combination(size, numOutput);
 			if (index >= tempSum + comb)
 			{
 				tempSum += comb;
@@ -291,7 +293,7 @@ public:
 				break;
 			}
 		}
-		if (numOutput >= order && (index > tempSum + combination(order, numOutput)))
+		if (numOutput >= size && (index > tempSum + combination(size, numOutput)))
 		{
 			cerr << "Unexpected result" << endl;
 		}
@@ -304,7 +306,7 @@ public:
 			//First find exactance of most weighted element (3 in ab. ex)
 			//if (index - tempSum) >= 3C2, that means 3 is in the vector
 			int element;
-			for (element = order - 1; element >= 0; element--)
+			for (element = size - 1; element >= 0; element--)
 			{
 				if (index - tempSum == 0)
 				{
